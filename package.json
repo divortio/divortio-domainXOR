@@ -1,0 +1,26 @@
+{
+  "name": "divortio-domainxor",
+  "version": "1.0.0",
+  "description": "A high-performance domain blocklist service using a PSL-Aware Hybrid XOR Filter model.",
+  "private": true,
+  "type": "module",
+  "main": "src/index.mjs",
+  "scripts": {
+    "build": "node build/index.mjs",
+    "dev": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/divortio/divortio-domainXOR.git"
+  },
+  "homepage": "https://github.com/divortio/divortio-domainXOR#readme",
+  "bugs": {
+    "url": "https://github.com/divortio/divortio-domainXOR/issues"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250807.0",
+    "wrangler": "^4.32.00"
+  }
+}

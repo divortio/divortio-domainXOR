@@ -1,0 +1,47 @@
+# wrangler.toml
+# This is the configuration file for the divortio-domainXOR project when
+# deployed as a standalone Cloudflare Worker.
+
+# The name of your Worker, used in the Cloudflare dashboard and for service bindings.
+name = "divortio-domainxor"
+
+# The main entry point for your Worker's logic.
+main = "src/index.mjs"
+
+# Defines the compatibility date, which enables modern features like RPC.
+compatibility_date = "2025-08-22"
+# Enables full Node.js API support within the Worker.
+compatibility_flags = ["nodejs_compat", "nodejs_als"]
+
+# --- Deployment Settings ---
+minify = true       # Minify the code for smaller size and faster cold starts.
+workers_dev = false # Disable the default *.workers.dev route for production.
+
+# --- Bindings ---
+# This section connects your code to the three required binary artifacts.
+
+# Binds the binary XOR filter for exact domain matches.
+[[data_blobs]]
+binding = "EXACT_XOR_BUFFER"
+path = "src/xor/exactXOR.bin"
+
+# Binds the binary XOR filter for wildcard domain matches.
+[[data_blobs]]
+binding = "WILDCARD_XOR_BUFFER"
+path = "src/xor/wildcardXOR.bin"
+
+# Binds the binary Trie for the Public Suffix List (PSL).
+[[data_blobs]]
+binding = "PSL_TRIE_BUFFER"
+path = "src/trie/pslTrie.bin"
+
+# --- Advanced Features ---
+
+# Smart Placement automatically runs this Worker closer to frequently connecting clients.
+[placement]
+mode = "smart"
+
+# Enables Workers Observability for production monitoring and analytics.
+[observability]
+enabled = true
+head_sampling_rate = 1
