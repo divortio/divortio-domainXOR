@@ -1,47 +1,71 @@
 # wrangler.toml
-# This is the configuration file for the divortio-domainXOR project when
-# deployed as a standalone Cloudflare Worker.
+# Configuration for the divortio-domainxor project.
+# Supports standalone deployment as a Cloudflare Worker RPC service.
 
 # The name of your Worker, used in the Cloudflare dashboard and for service bindings.
 name = "divortio-domainxor"
 
 # The main entry point for your Worker's logic.
-main = "src/index.mjs"
+# Using .mjs extension signifies an ES Module.
+main = "src/build.01.run.mjs"
 
-# Defines the compatibility date, which enables modern features like RPC.
+# Compatibility Date: "2025-08-22"
+# This ensures access to the latest runtime features, including:
+# - Native RPC support (WorkerEntrypoint)
+# - Explicit Resource Management ('using' keyword)
+# - Improved streams and standard web API compliance
 compatibility_date = "2025-08-22"
-# Enables full Node.js API support within the Worker.
+
+# Compatibility Flags
+# - nodejs_compat: Enables the `node:` prefix for built-in modules (e.g., Buffer, AsyncLocalStorage).
+# - nodejs_als: Specific optimization for AsyncLocalStorage, often used for tracing/logging context.
 compatibility_flags = ["nodejs_compat", "nodejs_als"]
 
 # --- Deployment Settings ---
-minify = true       # Minify the code for smaller size and faster cold starts.
-workers_dev = false # Disable the default *.workers.dev route for production.
+
+# Minify the code for smaller size and faster cold starts.
+minify = true
+
+# Disable the default *.workers.dev route for production security.
+# You should configure a custom domain or route via the dashboard if needed.
+workers_dev = false
+
+# Disable preview URLs to prevent accidental exposure of draft deployments.
+preview_urls = false
 
 # --- Bindings ---
 # This section connects your code to the three required binary artifacts.
+# These files are uploaded with your worker and available as ArrayBuffers on `env`.
 
-# Binds the binary XOR filter for exact domain matches.
+# 1. Exact Match Filter (XOR Filter)
 [[data_blobs]]
 binding = "EXACT_XOR_BUFFER"
 path = "src/xor/exactXOR.bin"
 
-# Binds the binary XOR filter for wildcard domain matches.
+# 2. Wildcard Match Filter (XOR Filter)
 [[data_blobs]]
 binding = "WILDCARD_XOR_BUFFER"
 path = "src/xor/wildcardXOR.bin"
 
-# Binds the binary Trie for the Public Suffix List (PSL).
+# 3. Public Suffix List Trie (Binary Trie)
 [[data_blobs]]
 binding = "PSL_TRIE_BUFFER"
 path = "src/trie/pslTrie.bin"
 
 # --- Advanced Features ---
 
-# Smart Placement automatically runs this Worker closer to frequently connecting clients.
+# Smart Placement
+# Automatically runs this Worker in the data center closest to where your
+# backend data (or frequently connecting clients) are located.
+# Note: For RPC calls between workers, placement is currently determined by the caller,
+# but this setting optimizes direct HTTP fetch traffic.
 [placement]
 mode = "smart"
 
-# Enables Workers Observability for production monitoring and analytics.
+# Observability
+# Enables Workers Observability for detailed logs, metrics, and tracing.
+# A sampling rate of 1 means 100% of requests are logged (useful for high-value/low-volume traffic).
+# Adjust this downwards (e.g., 0.01) for very high traffic to manage costs.
 [observability]
 enabled = true
 head_sampling_rate = 1

@@ -1,0 +1,63 @@
+name: Build DomainXOR Artifacts
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build & Verify
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22 # Use latest LTS or 24 if available
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Test Suite
+        run: npm test
+        # Fails the workflow if unit tests or integration tests fail.
+
+      - name: Build Artifacts
+        run: npm run build
+        # Runs the full pipeline: Fetch -> Parse -> Build -> Verify -> Report.
+        # Also generates src/built/meta.mjs and BUILD_REPORT.md.
+
+      - name: Generate Release Version
+        id: version
+        run: echo "VERSION=$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_OUTPUT
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: domainxor-build-${{ steps.version.outputs.VERSION }}
+          path: |
+            src/built/bins/exactXOR.bin
+            src/built/bins/wildcardXOR.bin
+            src/built/bins/pslTrie.bin
+            src/built/stats/k
+            src/built/meta.mjs
+            src/lib/lookup.mjs
+            BUILD_REPORT.md
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish Release (Optional)
+        # Uncomment this block if you want to create a GitHub Release with the artifacts attached
+        # uses: softprops/action-gh-release@v1
+        # with:
+        #   tag_name: v${{ steps.version.outputs.VERSION }}
+        #   name: Build ${{ steps.version.outputs.VERSION }}
+        #   body_path: src/built/BUILD_REPORT.md
+        #   files: |
+        #     src/built/bins/*.bin
+        #     src/lib/lookup.mjs

@@ -6,9 +6,10 @@
   "type": "module",
   "main": "src/index.mjs",
   "scripts": {
-    "build": "node build/index.mjs",
+    "build": "node build/build.run.mjs && node build/build.verify.mjs && node build/steps/build.04.report.mjs",
     "dev": "npm run build && wrangler dev",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy": "npm run build && wrangler deploy",
+    "test": "node --test tests/"
   },
   "repository": {
     "type": "git",
@@ -18,7 +19,6 @@
   "bugs": {
     "url": "https://github.com/divortio/divortio-domainXOR/issues"
   },
-  "dependencies": {},
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250807.0",
     "wrangler": "^4.32.00"
