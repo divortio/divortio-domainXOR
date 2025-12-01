@@ -6,7 +6,7 @@
   "type": "module",
   "main": "src/index.mjs",
   "scripts": {
-    "build": "node build/build.run.mjs && node build/build.verify.mjs && node build/steps/build.04.report.mjs",
+    "build": "node build/build.mjs",
     "dev": "npm run build && wrangler dev",
     "deploy": "npm run build && wrangler deploy",
     "test": "node --test tests/"

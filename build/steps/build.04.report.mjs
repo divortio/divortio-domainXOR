@@ -1,161 +1,295 @@
 /**
- * @file build/buildReport.mjs
- * @description Generates a comprehensive Markdown build report from collected statistics
- * AND prints a high-level "Funnel" summary to the console.
+ * @file build/steps/build.04.report.mjs
+ * @description The Final Reporting Step (Step 4).
+ * This module aggregates all statistics collected throughout the build pipeline
+ * (persisted in `dist/domainXOR/stats/*.js`) and compiles them into human-readable
+ * Markdown documentation.
+ *
+ * Outputs:
+ * 1. **BUILD.md**: High-level summary, global metrics, and artifact details.
+ * 2. **LISTS.md**: Deep-dive analysis of every source list, including rejection rates and wildcard counts.
+ *
+ * @module BuildReporter
  */
 
 import fs from 'fs';
 import path from 'path';
-import { STATS_DIR, BUILD_DIR } from '../config.mjs';
+import { BUILD_DOCS_DIR, STATS_DIR } from '../config.mjs';
 
-// --- Helper: Dynamic Imports for stats files ---
-async function loadStats() {
-    const buildStatsPath = path.join(STATS_DIR, 'build.js');
-    const exactStatsPath = path.join(STATS_DIR, 'exactXOR.js');
-    const wildcardStatsPath = path.join(STATS_DIR, 'wildcardXOR.js');
-    const pslStatsPath = path.join(STATS_DIR, 'pslTrie.js');
-    const listsStatsPath = path.join(STATS_DIR, 'lists.js');
+/**
+ * The absolute path to the main build summary report.
+ * @constant {string}
+ */
+const REPORT_FILE = path.join(BUILD_DOCS_DIR, 'BUILD.md');
 
-    const safeImport = async (p) => {
-        try {
-            const module = await import(p);
-            return module.stats;
-        } catch (e) { return null; }
-    };
+/**
+ * The absolute path to the detailed source lists report.
+ * @constant {string}
+ */
+const LISTS_REPORT_FILE = path.join(BUILD_DOCS_DIR, 'LISTS.md');
 
-    return {
-        build: await safeImport(buildStatsPath),
-        exact: await safeImport(exactStatsPath),
-        wildcard: await safeImport(wildcardStatsPath),
-        psl: await safeImport(pslStatsPath),
-        lists: await safeImport(listsStatsPath) || []
-    };
+/**
+ * Represents the structure of the `lists.js` stats object.
+ * @typedef {object} ListStat
+ * @property {string} url - Source URL.
+ * @property {number} entryCount - Valid domains included.
+ * @property {number} wildcardCount - Number of wildcard rules (*.).
+ * @property {number} rawCount - Total lines in source file.
+ * @property {number} sizeBytes - Size of source file.
+ * @property {string} [contentHash] - MD5 hash of source content.
+ * @property {number} durationSeconds - Parse time.
+ * @property {number} httpStatus - HTTP Status Code.
+ * @property {object} [details] - Rejection details.
+ * @property {number} details.cosmetic - Dropped cosmetic rules.
+ * @property {number} details.exceptions - Dropped exception rules (@@).
+ * @property {number} details.urls - Dropped URLs/paths.
+ * @property {number} details.ips - Dropped IP addresses.
+ * @property {number} details.comments - Comments/empty lines.
+ */
+
+/**
+ * Dynamically imports a statistics module from the stats directory.
+ * Used to load build metrics that may or may not exist (e.g. optional whitelist).
+ *
+ * @async
+ * @param {string} filename - The name of the stats file (e.g. "build.js").
+ * @returns {Promise<object|Array<ListStat>|null>} The exported stats data or null.
+ */
+async function importStats(filename) {
+    const filePath = path.join(STATS_DIR, filename);
+    if (!fs.existsSync(filePath)) return null;
+    try {
+        const module = await import(filePath);
+        return module.stats;
+    } catch (e) {
+        console.warn(`Warning: Could not import stats from ${filename}:`, e.message);
+        return null;
+    }
 }
 
-// --- Helper: Formatting ---
+/**
+ * Formats a table row for Markdown.
+ * @param {string[]} columns
+ * @returns {string}
+ */
+function toRow(columns) {
+    return `| ${columns.join(' | ')} |`;
+}
+
+/**
+ * Formats a number with commas.
+ * @param {number} [n=0]
+ * @returns {string}
+ */
+function formatNum(n) {
+    return new Intl.NumberFormat('en-US').format(n || 0);
+}
+
+/**
+ * Formats bytes into human-readable string (KB/MB).
+ * @param {number} [bytes=0]
+ * @returns {string}
+ */
 function formatBytes(bytes) {
     if (!bytes) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
-function formatNumber(num) {
-    return new Intl.NumberFormat('en-US').format(num || 0);
-}
+/**
+ * Generates and writes the detailed LISTS.md report.
+ *
+ * @param {Array<ListStat>} listStats - Array of list statistics.
+ * @param {string} buildDate - Formatted build date string.
+ */
+function generateListsReport(listStats, buildDate) {
+    if (!listStats || !Array.isArray(listStats)) return;
 
-function calculatePercentage(part, total) {
-    if (!total) return '0%';
-    return ((part / total) * 100).toFixed(1) + '%';
-}
+    const lines = [];
+    lines.push(`# 📋 Source List Report`);
+    lines.push(``);
+    lines.push(`**Build Date:** ${buildDate}`);
+    lines.push(`**Total Sources:** ${listStats.length}`);
+    lines.push(``);
 
-// --- Helper: Console Output ---
-function printConsoleSummary(data, funnel) {
-    const { build, exact, wildcard, psl } = data;
+    lines.push(`## Summary Table`);
+    lines.push(`| Source | Valid Domains | Wildcards | Raw Size | Hash (MD5) |`);
+    lines.push(`| :--- | :--- | :--- | :--- | :--- |`);
 
-    console.log('\n==================================================');
-    console.log('   🚀  DIVORTIO DOMAINXOR BUILD SUMMARY  🚀');
-    console.log('==================================================');
+    // Sort by entry count (descending)
+    listStats.sort((a, b) => b.entryCount - a.entryCount);
 
-    console.log('\n--- Data Pipeline Funnel ---');
-    console.log(`1. Ingested (Raw Lines):  ${formatNumber(funnel.totalRawLines)}`);
-    console.log(`2. Parsed (Valid Rules):  ${formatNumber(funnel.totalParsed)} (${calculatePercentage(funnel.totalParsed, funnel.totalRawLines)} retention)`);
-    console.log(`3. Consolidated (Unique): ${formatNumber(funnel.totalUnique)} (${calculatePercentage(funnel.totalUnique, funnel.totalParsed)} unique)`);
-    console.log(`   └─ Duplicates Removed: ${formatNumber(funnel.duplicatesRemoved)}`);
+    for (const l of listStats) {
+        let name = l.url.split('/').pop() || l.url;
+        // Truncate long names for table readability
+        if (name.length > 30) name = name.substring(0, 27) + '...';
 
-    console.log('\n--- Artifact Analysis ---');
-    const tableData = [
-        { name: 'Exact Filter', entries: formatNumber(exact.entryCount), size: exact.sizeH, fpr: exact.falsePositiveRate },
-        { name: 'Wildcard Filter', entries: formatNumber(wildcard.entryCount), size: wildcard.sizeH, fpr: wildcard.falsePositiveRate },
-        { name: 'PSL Trie', entries: formatNumber(psl.entryCount), size: psl.sizeH, fpr: 'N/A' }
-    ];
-    console.table(tableData);
+        const hashShort = l.contentHash ? `\`${l.contentHash.substring(0, 8)}...\`` : 'N/A';
 
-    console.log(`\nTotal Build Time: ${build.totalBuildDurationSeconds}s`);
-    console.log('==================================================\n');
-}
-
-// --- Main Generator ---
-async function buildReport() {
-    const data = await loadStats();
-    if (!data.build) {
-        console.error('❌ Critical: Build stats not found. Cannot generate report.');
-        process.exit(1);
+        lines.push(toRow([
+            `[${name}](${l.url})`,
+            formatNum(l.entryCount),
+            formatNum(l.wildcardCount),
+            formatBytes(l.sizeBytes),
+            hashShort
+        ]));
     }
 
-    const { build, exact, wildcard, psl, lists } = data;
+    lines.push(``);
+    lines.push(`## 🔍 Detailed Breakdown`);
 
-    // Calculate Funnel Metrics
-    // 'rawCount' is captured in fetchList.mjs. Fallback to entryCount if missing (legacy builds).
-    const totalRawLines = lists.reduce((sum, l) => sum + (l.rawCount || l.entryCount), 0);
-    const totalParsed = build.totalRawDomains; // Sum of all parsed domains
-    const totalUnique = build.totalUniqueDomains; // Size of the final deduplicated Set
-    const duplicatesRemoved = totalParsed - totalUnique;
+    for (const l of listStats) {
+        lines.push(`### ${l.url}`);
+        lines.push(`- **Status:** HTTP ${l.httpStatus}`);
+        lines.push(`- **Time:** ${l.durationSeconds}s`);
+        lines.push(`- **Content Hash:** \`${l.contentHash || 'N/A'}\``);
+        lines.push(``);
+        lines.push(`#### Processing Stats`);
+        lines.push(`| Metric | Count | Description |`);
+        lines.push(`| :--- | :--- | :--- |`);
+        lines.push(`| **Raw Lines** | ${formatNum(l.rawCount)} | Total lines downloaded |`);
+        lines.push(`| **Valid Domains** | **${formatNum(l.entryCount)}** | Successfully parsed domains |`);
+        lines.push(`| **Wildcards** | ${formatNum(l.wildcardCount)} | Rules starting with \`*.\` or \`||\` |`);
 
-    const funnel = { totalRawLines, totalParsed, totalUnique, duplicatesRemoved };
-
-    // 1. Print Console Summary
-    printConsoleSummary(data, funnel);
-
-    // 2. Generate Markdown Report
-    const reportDate = new Date(build.buildTimestamp).toLocaleString();
-
-    let md = `# 🛡️ Divortio DomainXOR Build Report
-**Build Date:** ${reportDate}  
-**Status:** ✅ Success
-
-## 🌪️ Data Processing Funnel
-Visualizing the optimization pipeline from raw source data to the final blocklist.
-
-| Stage | Count | Description |
-| :--- | :--- | :--- |
-| **1. Ingested** | **${formatNumber(totalRawLines)}** | Total raw lines fetched from ${build.sourceListCount} source lists. |
-| **2. Parsed** | ${formatNumber(totalParsed)} | Valid domain/wildcard rules extracted (comments/garbage removed). |
-| **3. Unique** | **${formatNumber(totalUnique)}** | Unique rules remaining after deduplication. |
-| **4. Dropped** | 📉 ${formatNumber(duplicatesRemoved)} | Duplicate rules removed during consolidation. |
-
----
-
-## 📦 Artifact Analysis
-The build generated **${build.binaries.length}** binary artifacts optimized for the Cloudflare Worker runtime.
-
-| Artifact | Type | Entries | Size | FPR* | Path |
-| :--- | :--- | :---: | :---: | :---: | :--- |
-| **Exact Filter** | 8-bit XOR | ${formatNumber(exact.entryCount)} | ${exact.sizeH} | ${exact.falsePositiveRate} | [\`${exact.filename}\`](../bins/${exact.filename}) |
-| **Wildcard Filter** | 8-bit XOR | ${formatNumber(wildcard.entryCount)} | ${wildcard.sizeH} | ${wildcard.falsePositiveRate} | [\`${wildcard.filename}\`](../bins/${wildcard.filename}) |
-| **PSL Trie** | Binary Trie | ${formatNumber(psl.entryCount)} | ${psl.sizeH} | N/A | [\`${psl.filename}\`](../bins/${psl.filename}) |
-
-<small>*FPR: Theoretical False Positive Rate based on 8-bit fingerprints.</small>
-
----
-
-## 📡 Source Intelligence
-Analysis of the upstream blocklists. **Efficiency** indicates how many valid rules were extracted relative to file size.
-
-| Source List | Raw Lines | Valid Rules | Size | Speed | Status |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-`;
-
-    const sortedLists = [...lists].sort((a, b) => b.entryCount - a.entryCount);
-
-    for (const list of sortedLists) {
-        const shortUrl = list.url.length > 45 ? list.url.substring(0, 42) + '...' : list.url;
-        const speed = list.durationSeconds < 0.5 ? `⚡ ${list.durationSeconds}s` : `${list.durationSeconds}s`;
-        // If rawCount is missing, fallback to N/A to avoid confusion
-        const raw = list.rawCount ? formatNumber(list.rawCount) : 'N/A';
-
-        md += `| [${shortUrl}](${list.url}) | ${raw} | **${formatNumber(list.entryCount)}** | ${formatBytes(list.sizeBytes)} | ${speed} | ${list.httpStatus === 200 ? '✅' : '⚠️ ' + list.httpStatus} |\n`;
+        if (l.details) {
+            lines.push(`| **Cosmetic** | ${formatNum(l.details.cosmetic)} | Element hiding rules (##) |`);
+            lines.push(`| **Exceptions** | ${formatNum(l.details.exceptions)} | Whitelist rules (@@) |`);
+            lines.push(`| **Dropped URLs** | ${formatNum(l.details.urls)} | Lines containing paths/queries |`);
+            lines.push(`| **IPs** | ${formatNum(l.details.ips)} | Valid IP addresses (Converted to Exact) |`);
+            lines.push(`| **Comments/Empty** | ${formatNum(l.details.comments)} | Skipped lines |`);
+        }
+        lines.push(``);
     }
 
-    md += `
----
-*Generated automatically by the Divortio DomainXOR Build System.*
-`;
+    lines.push(`---`);
+    lines.push(`*Generated automatically by \`build/steps/build.04.report.mjs\`*`);
 
-    const outputPath = path.join(BUILD_DIR, 'BUILD_REPORT.md');
-    fs.writeFileSync(outputPath, md);
-    console.log(`✅ Report generated: ${path.relative(process.cwd(), outputPath)}`);
+    // Ensure docs dir exists
+    if (!fs.existsSync(BUILD_DOCS_DIR)) fs.mkdirSync(BUILD_DOCS_DIR, { recursive: true });
+
+    fs.writeFileSync(LISTS_REPORT_FILE, lines.join('\n'));
+    console.log(`\n✅ Lists Report generated at: ${path.relative(process.cwd(), LISTS_REPORT_FILE)}`);
 }
 
-buildReport();
+/**
+ * Main execution function.
+ * Orchestrates the loading of stats and generation of both reports.
+ *
+ * @async
+ * @returns {Promise<void>}
+ */
+async function main() {
+    console.log("--- Generating Build Reports ---");
+
+    // 1. Import Stats
+    const buildStats = await importStats('build.js');
+    const listStats = await importStats('lists.js');
+    const exactStats = await importStats('exactXOR.js');
+    const wildcardStats = await importStats('wildcardXOR.js');
+    const pslStats = await importStats('pslTrie.js');
+    const whitelistStats = await importStats('shadowWhitelist.js');
+
+    if (!buildStats) {
+        throw new Error("Critical: Missing 'build.js' stats. Did the build run complete?");
+    }
+
+    const buildDateStr = new Date(buildStats.buildTimestamp).toUTCString();
+
+    // 2. Generate Main Summary (BUILD.md)
+    const lines = [];
+    lines.push(`# 🏗️ Build Summary Report`);
+    lines.push(``);
+    lines.push(`**Build Date:** ${buildDateStr}  `);
+    lines.push(`**Total Duration:** ${buildStats.totalBuildDurationSeconds} seconds`);
+    lines.push(``);
+
+    // Global Metrics Table
+    lines.push(`## 📊 Global Metrics`);
+    lines.push(`| Metric | Value | Details |`);
+    lines.push(`| :--- | :--- | :--- |`);
+    lines.push(toRow([`**Total Unique Domains**`, `**${formatNum(buildStats.totalUniqueDomains)}**`, `Processed Domains`]));
+    lines.push(toRow([`**Exact Matches**`, `${formatNum(buildStats.exactCount)}`, `Standard Blocks`]));
+    lines.push(toRow([`**Wildcards**`, `${formatNum(buildStats.wildcardCount)}`, `\`*.example.com\` Blocks`]));
+    lines.push(toRow([`**Raw Input**`, `${formatNum(buildStats.totalRawDomains)}`, `Lines Processed`]));
+    lines.push(toRow([`**Artifact Size**`, `**${buildStats.totalSizeBytesH}**`, `Runtime Memory Footprint`]));
+    lines.push(``);
+
+    // Artifacts Table
+    lines.push(`## 📦 Artifact Details`);
+    lines.push(`| Artifact | Entries | Size | Logic |`);
+    lines.push(`| :--- | :--- | :--- | :--- |`);
+
+    if (exactStats) {
+        lines.push(toRow([
+            `**Exact Filter**`,
+            formatNum(exactStats.entryCount),
+            exactStats.sizeH,
+            `16-bit XOR (~0.0015% FPR)`
+        ]));
+    }
+    if (wildcardStats) {
+        lines.push(toRow([
+            `**Wildcard Filter**`,
+            formatNum(wildcardStats.entryCount),
+            wildcardStats.sizeH,
+            `16-bit XOR (~0.0015% FPR)`
+        ]));
+    }
+    if (pslStats) {
+        lines.push(toRow([
+            `**PSL Trie**`,
+            formatNum(pslStats.entryCount),
+            pslStats.sizeH,
+            `Binary Trie`
+        ]));
+    }
+    if (whitelistStats) {
+        lines.push(toRow([
+            `**Shadow Whitelist**`,
+            formatNum(whitelistStats.entryCount),
+            whitelistStats.sizeH,
+            `Binary Search (Rescue)`
+        ]));
+    }
+
+    lines.push(``);
+    lines.push(`## 📥 Source List Overview`);
+    lines.push(`> See [LISTS.md](./LISTS.md) for detailed breakdown.`);
+    lines.push(``);
+    lines.push(`| Source URL | Domains | Wildcards | Size | Status |`);
+    lines.push(`| :--- | :--- | :--- | :--- | :--- |`);
+
+    if (Array.isArray(listStats)) {
+        listStats.sort((a, b) => b.entryCount - a.entryCount);
+        for (const list of listStats) {
+            const shortUrl = list.url.length > 50 ? list.url.substring(0, 47) + '...' : list.url;
+            lines.push(toRow([
+                `\`${shortUrl}\``,
+                formatNum(list.entryCount),
+                formatNum(list.wildcardCount || 0),
+                formatBytes(list.sizeBytes),
+                list.httpStatus === 200 ? '✅ 200' : (list.httpStatus === 304 ? '⚡ 304' : `⚠️ ${list.httpStatus}`),
+            ]));
+        }
+    }
+
+    lines.push(``);
+    lines.push(`---`);
+    lines.push(`*Generated automatically by \`build/steps/build.04.report.mjs\`*`);
+
+    // Write BUILD.md
+    if (!fs.existsSync(BUILD_DOCS_DIR)) fs.mkdirSync(BUILD_DOCS_DIR, { recursive: true });
+    fs.writeFileSync(REPORT_FILE, lines.join('\n'));
+    console.log(`\n✅ Build Report generated at: ${path.relative(process.cwd(), REPORT_FILE)}`);
+
+    // 3. Generate LISTS.md
+    generateListsReport(listStats, buildDateStr);
+}
+
+// Execute
+main().catch(err => {
+    console.error("Report generation failed:", err);
+    process.exit(1);
+});

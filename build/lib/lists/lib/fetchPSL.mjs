@@ -1,5 +1,5 @@
 /**
- * @file build/fetchPSL.mjs
+ * @file build/lib/lists/lib/fetchPSL.mjs
  * @description A dedicated module for fetching and parsing the Public Suffix List (PSL)
  * from the official source. The PSL is critical for the build process to correctly
  * distinguish between a registrable domain (e.g., "google.com") and a Top Level Domain
@@ -9,7 +9,10 @@
 
 import { startTimer, stopTimer, addListData } from '../../stats/statsCollector.js';
 
-// The official source URL for the Public Suffix List.
+/**
+ * The official source URL for the Public Suffix List.
+ * @constant {string}
+ */
 const PSL_URL = 'https://publicsuffix.org/list/public_suffix_list.dat';
 
 /**
@@ -22,8 +25,8 @@ const PSL_URL = 'https://publicsuffix.org/list/public_suffix_list.dat';
  * 4. Parses the file, stripping comments ("//") and empty lines.
  * 5. Reports execution statistics to the central collector.
  *
- * @returns {Promise<Set<string>>} A promise that resolves to a Set containing all unique public suffixes.
- * @throws {Error} If the download fails (network/timeout), the response is invalid, or the parsed set is empty.
+ * @returns {Promise<Set<string>>} A Promise that resolves to a Set of strings, where each string is a valid, lowercase public suffix (e.g., "co.uk", "com").
+ * @throws {Error} Throws if the download fails (network error, timeout), returns a non-200 status code, or if the resulting parsed list is empty.
  */
 export async function fetchPSL() {
     const timerKey = `fetch-${PSL_URL}`;
