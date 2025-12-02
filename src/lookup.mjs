@@ -10,7 +10,7 @@
  * Optimizations:
  * - Inlined hashing (`cyrb53a`) to avoid function call overhead in V8.
  * - TypedArrays (`Uint16Array`, `Int32Array`) to avoid GC pressure.
- * - Single-pass parsing logic.
+ * - Monomorphic integer return codes for JIT optimization.
  *
  * @module DomainLookup
  */
@@ -48,6 +48,14 @@ const MAX_DOMAIN_PARTS = 128;
  * @type {Int32Array}
  */
 const dotIndices = new Int32Array(MAX_DOMAIN_PARTS);
+
+// --- Result Codes (Monomorphic optimization) ---
+/** @constant {number} Domain is allowed (not in filter). */
+const RESULT_ALLOWED = 0;
+/** @constant {number} Domain is explicitly blocked. */
+const RESULT_BLOCKED = 1;
+/** @constant {number} Domain was blocked but rescued by whitelist. */
+const RESULT_WHITELISTED = 2;
 
 /**
  * Initializes the global TypedArray views on the provided raw binary buffers.
@@ -145,16 +153,18 @@ function binarySearch(arr, val) {
  * Includes "Rescue" logic: if a block is found, it consults the Shadow Whitelist.
  *
  * Uses an inlined version of `cyrb53a` for maximum performance (no function call overhead).
+ * Returns an integer status code for JIT optimization.
  *
  * @param {string} str - The source domain string.
  * @param {number} start - The start index of the substring.
  * @param {number} end - The end index of the substring.
  * @param {Uint16Array} filter - The XOR filter view to check against.
- * @returns {boolean} `true` if the domain is blocked (and NOT whitelisted), otherwise `false`.
+ * @param {boolean} checkWhitelist - Whether to check the shadow whitelist (Rescue/Global Override).
+ * @returns {number} `RESULT_BLOCKED`, `RESULT_ALLOWED`, or `RESULT_WHITELISTED`.
  */
-function _xorContains(str, start, end, filter) {
+function _xorContains(str, start, end, filter, checkWhitelist) {
     const len = filter.length;
-    if (len === 0) return false;
+    if (len === 0) return RESULT_ALLOWED;
 
     // --- cyrb53a_beta (Inlined Hash) ---
     // Seed = 0 (0xdeadbeef / 0x41c6ce57)
@@ -178,12 +188,22 @@ function _xorContains(str, start, end, filter) {
     const h2u = h2 >>> 0;
     // ----------------------------
 
+    // --- WHITELIST CHECK (Global Override) ---
+    // If enabled (e.g. Exact Match), check whitelist immediately.
+    // Used to override blocks for Critical/Recommended domains.
+    if (checkWhitelist && shadowWhitelist.length > 0) {
+        if (binarySearch(shadowWhitelist, h1u)) {
+            return RESULT_WHITELISTED;
+        }
+    }
+
+    // --- FILTER CHECK ---
     // Map to 3 slots
     const h0 = h1u % len;
     const l1 = h2u % len;
     const l2 = (h1u + h2u) % len;
 
-    // UPDATED: Extract 16-bit fingerprint (0xFFFF)
+    // Extract 16-bit fingerprint (0xFFFF)
     // Must match BUILD config (XOR_BIT_DEPTH = 16)
     let fp = (h1u >>> 16) & 0xFFFF;
 
@@ -194,33 +214,33 @@ function _xorContains(str, start, end, filter) {
     // Direct XOR check
     const matchesFilter = fp === (filter[h0] ^ filter[l1] ^ filter[l2]);
 
-    if (!matchesFilter) return false;
+    if (!matchesFilter) return RESULT_ALLOWED;
 
-    // --- WHITELIST RESCUE ---
-    // If the filter says "Block", check the Shadow Whitelist.
-    // If found, this is a known False Positive -> Rescue it (Return False).
-    if (shadowWhitelist.length > 0) {
-        // Reuse h1u (the 32-bit hash) for the check to avoid re-hashing
+    // --- RESCUE CHECK (Collision Mitigation) ---
+    // If we didn't check whitelist above (e.g. Wildcard mode), check it now
+    // to see if this specific hash is a known false positive.
+    // Optimization: Reuse h1u to avoid re-hashing.
+    if (!checkWhitelist && shadowWhitelist.length > 0) {
         if (binarySearch(shadowWhitelist, h1u)) {
-            return false; // Rescued
+            return RESULT_ALLOWED; // Treated as allowed/rescued, not "Whitelisted" override
         }
     }
 
-    return true; // Confirmed Block
+    return RESULT_BLOCKED;
 }
 
 /**
  * Determines if a domain is blocked by checking the Exact and Wildcard filters.
  *
  * This function performs a sequential scan:
- * 1. **Exact Check**: Is the full domain blocked?
+ * 1. **Exact Check**: Is the full domain blocked or globally whitelisted?
  * 2. **Dot Scan**: Locates all dot positions without string splitting.
  * 3. **PSL Discovery**: Traverses the Trie to find the "Effective TLD" (e.g., `co.uk`).
  * 4. **Wildcard Check**: Checks all parent domains up to the effective TLD.
  *
  * @param {string} domain - The fully qualified domain name to check (must be lowercase).
  * @param {object} buffers - The buffer object containing `exactXOR`, `wildcardXOR`, `pslTrie`, and optional `shadowWhitelist`.
- * @returns {boolean} `true` if the domain or any of its valid parents are blocked.
+ * @returns {boolean} `true` if the domain is blocked, `false` otherwise.
  */
 export function domainExists(domain, buffers) {
     if (!isInitialized) _init(buffers);
@@ -230,8 +250,16 @@ export function domainExists(domain, buffers) {
 
     const len = domain.length;
 
-    // 1. Exact Match Check
-    if (_xorContains(domain, 0, len, exactFilter)) return true;
+    // 1. Exact Match & Global Whitelist Check
+    // Pass true to checkWhitelist to enable "Global Override".
+    const exactResult = _xorContains(domain, 0, len, exactFilter, true);
+
+    // If explicitly whitelisted, return FALSE immediately (Allow)
+    // This short-circuits any potential wildcard blocks for this domain.
+    if (exactResult === RESULT_WHITELISTED) return false;
+
+    // If explicitly blocked, return TRUE immediately (Block)
+    if (exactResult === RESULT_BLOCKED) return true;
 
     // 2. Dot Scanning (Zero-Alloc)
     // Locate all dot positions to allow substring operations without splitting
@@ -293,7 +321,12 @@ export function domainExists(domain, buffers) {
         // Stop if we hit the effective TLD
         if (lastPslIndex !== -1 && start > lastPslIndex) break;
 
-        if (_xorContains(domain, start, len, wildcardFilter)) return true;
+        // For wildcards, we pass false to checkWhitelist.
+        // We rely on the exact match check (Step 1) to handle global overrides.
+        // If the parent is blocked (RESULT_BLOCKED), we block the subdomain.
+        if (_xorContains(domain, start, len, wildcardFilter, false) === RESULT_BLOCKED) {
+            return true;
+        }
     }
 
     return false;

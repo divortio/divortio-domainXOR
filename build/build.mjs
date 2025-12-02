@@ -11,9 +11,10 @@
  * 5. **Cleanup**: Remove temporary artifacts (`build.06`).
  *
  * **Failure Handling**:
- * If any step fails (non-zero exit code), the orchestrator immediately triggers
- * the Cleanup step to remove intermediate data (preventing "poisoned" builds)
- * and then aborts the process.
+ * If any step fails, we trigger a "Reset" cleanup (wipes binaries/snapshots, keeps raw downloads).
+ *
+ * **Success Handling**:
+ * If successful, we trigger a "Smart" cleanup (wipes snapshots, keeps binaries & raw downloads).
  *
  * @module BuildMaster
  */
@@ -35,8 +36,14 @@ const __filepath = fileURLToPath(import.meta.url);
 const __dirpath = path.dirname(__filepath);
 
 /**
+ * The absolute path to the cleanup script.
+ * @constant {string}
+ */
+const CLEANUP_SCRIPT = path.join(__dirpath, 'steps/build.06.cleanup.mjs');
+
+/**
  * The ordered list of build scripts to execute.
- * Order is critical as subsequent steps depend on the artifacts produced by previous steps.
+ * NOTE: Cleanup is NOT in this list; it is handled explicitly at the end or on error.
  * @constant {string[]}
  */
 const BUILD_STEPS = [
@@ -47,14 +54,28 @@ const BUILD_STEPS = [
     'steps/build.03.validate.mjs', // 3. Validate Coverage (Source mapping check)
     'steps/build.04.report.mjs',   // 4. Generate Markdown Report
     'steps/build.05.bench.mjs',    // 5. Run Performance Benchmark (Tranco 1M)
-    'steps/build.06.cleanup.mjs',  // 6. Cleanup Temporary Files (Cache & Data)
 ];
 
 /**
+ * Helper to run the cleanup script with specific flags.
+ * @param {string[]} flags - Arguments to pass (e.g., ['--reset'] or ['--smart']).
+ */
+function runCleanup(flags) {
+    console.log(`\n🧹 Triggering Cleanup (${flags.join(' ')})...`);
+    const result = spawnSync('node', [CLEANUP_SCRIPT, ...flags], {
+        stdio: 'inherit',
+        encoding: 'utf-8',
+        cwd: process.cwd()
+    });
+
+    if (result.status !== 0) {
+        console.error('⚠️ Cleanup script failed to run correctly.');
+    }
+}
+
+/**
  * Executes the build pipeline.
- * Iterates through `BUILD_STEPS`, spawning a synchronous Node.js process for each.
- *
- * @returns {void} This function does not return a value. It exits the process on failure.
+ * @returns {void}
  */
 function runPipeline() {
     console.log('\n==================================================');
@@ -69,34 +90,27 @@ function runPipeline() {
 
         console.log(`\n🔹 Executing Step: ${stepName}`);
 
-        // Spawn node process inheriting stdio so colors and logs are preserved
         const result = spawnSync('node', [fullPath], {
             stdio: 'inherit',
             encoding: 'utf-8',
-            cwd: process.cwd() // Ensure running from root
+            cwd: process.cwd()
         });
 
-        // Check for spawn errors (e.g., node not found)
+        // Handle Spawn Error
         if (result.error) {
             console.error(`\n❌ FATAL: Failed to spawn process for ${stepName}`);
             console.error(result.error);
             process.exit(1);
         }
 
-        // Check for script execution errors (non-zero exit code)
+        // Handle Script Failure
         if (result.status !== 0) {
             console.error(`\n❌ FATAL: ${stepName} failed with exit code ${result.status}`);
 
-            // AUTO-RECOVERY: Run cleanup to reset poisoned state
-            // We skip this if the failing step *was* the cleanup step to avoid loops.
-            if (stepName !== 'build.06.cleanup.mjs') {
-                console.error('   Running automated cleanup to reset build state...');
-                const cleanupPath = path.join(__dirpath, 'steps/build.06.cleanup.mjs');
-                spawnSync('node', [cleanupPath], {
-                    stdio: 'inherit',
-                    cwd: process.cwd()
-                });
-            }
+            // FAILURE MODE: RESET
+            // We want to delete the potentially corrupted binaries and snapshots so the next run is clean.
+            // We do NOT want to delete the raw downloads (too slow to re-fetch).
+            runCleanup(['--reset']);
 
             console.error('   Build pipeline aborted.');
             process.exit(1);
@@ -107,7 +121,12 @@ function runPipeline() {
 
     console.log('\n==================================================');
     console.log(`   ✅ BUILD PIPELINE COMPLETE (${totalDuration}s)`);
-    console.log('==================================================\n');
+    console.log('==================================================');
+
+    // SUCCESS MODE: SMART CLEAN
+    // We want to delete the intermediate JSON snapshots (to save space/confusion).
+    // We MUST PRESERVE the binaries we just built and the raw downloads.
+    runCleanup(['--smart']);
 }
 
 // Execute the pipeline

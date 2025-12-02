@@ -73,7 +73,7 @@ async function main() {
 
         const stats = buildShadowWhitelist();
         generateReport(stats);
-        writeAllStats({});
+        await writeAllStats({});
 
         console.log("\n✅ Whitelist Generation Complete.");
     } catch (error) {

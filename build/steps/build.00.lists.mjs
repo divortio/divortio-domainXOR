@@ -82,7 +82,7 @@ async function main() {
     saveArtifact(DATA_FILES.LISTS, compiledLists);
 
     // Persist stats for later steps
-    writeAllStats({});
+    await writeAllStats({});
 
     const totalDomains = compiledLists.reduce((sum, list) => sum + list.count, 0);
     const duration = stopTimer(timerKey);

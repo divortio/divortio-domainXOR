@@ -1,7 +1,7 @@
 # 🛡️ Shadow Whitelist Report
 
-**Date:** 2025-12-01T10:55:39.935Z
-**Total Rescued Domains:** 72
+**Date:** 2025-12-02T03:13:43.346Z
+**Total Rescued Domains:** 68
 
 This list contains domains that were blocked by the XOR filter logic but have been **rescued** (whitelisted) for the following reasons:
 - **Forced Critical/Recommended**: Explicitly allowed by configuration to prevent breakage.
@@ -41,46 +41,42 @@ This list contains domains that were blocked by the XOR filter logic but have be
 | 30 | `youtube.com` | Forced Recommended |
 | 31 | `1-2-do.com` | Collision (Top 1M) |
 | 32 | `aceitesabasa.com` | Collision (Top 1M) |
-| 33 | `anime-death-note-jut.su` | Collision (Top 1M) |
-| 34 | `anthrowiki.at` | Collision (Top 1M) |
-| 35 | `argument.of.by` | Collision (Top 1M) |
+| 33 | `adultload.ws` | Collision (Top 1M) |
+| 34 | `anime-death-note-jut.su` | Collision (Top 1M) |
+| 35 | `anthrowiki.at` | Collision (Top 1M) |
 | 36 | `awardsworldwide.com` | Collision (Top 1M) |
 | 37 | `bestpornsitexxx.com` | Collision (Top 1M) |
 | 38 | `cbdnewsdelivered.com` | Collision (Top 1M) |
 | 39 | `delimajitu.rodeo` | Collision (Top 1M) |
-| 40 | `detikbetpro.shop` | Collision (Top 1M) |
-| 41 | `everworkx.de` | Collision (Top 1M) |
-| 42 | `foodanddrinktechnology.com` | Collision (Top 1M) |
-| 43 | `fremontbank.com` | Collision (Top 1M) |
-| 44 | `game4u.co.za` | Collision (Top 1M) |
-| 45 | `genietravel.com` | Collision (Top 1M) |
-| 46 | `gentaur.com` | Collision (Top 1M) |
-| 47 | `glmu.edu.cn` | Collision (Top 1M) |
-| 48 | `hoeren.club` | Collision (Top 1M) |
-| 49 | `horecatiger.eu` | Collision (Top 1M) |
-| 50 | `idexxneo.com` | Collision (Top 1M) |
-| 51 | `inplainsiteuk.com` | Collision (Top 1M) |
-| 52 | `lions-matome.com` | Collision (Top 1M) |
-| 53 | `locally.com` | Collision (Top 1M) |
-| 54 | `macmillantech.com` | Collision (Top 1M) |
-| 55 | `mills.no` | Collision (Top 1M) |
-| 56 | `payway.com.ar` | Collision (Top 1M) |
-| 57 | `pnt19.com` | Collision (Top 1M) |
-| 58 | `responsum.app` | Collision (Top 1M) |
-| 59 | `roomie.jp` | Collision (Top 1M) |
-| 60 | `serakon.com` | Collision (Top 1M) |
-| 61 | `studio-mt.net` | Collision (Top 1M) |
-| 62 | `trendyol.global` | Collision (Top 1M) |
-| 63 | `ubsk.sk` | Collision (Top 1M) |
-| 64 | `unimercatorum.it` | Collision (Top 1M) |
-| 65 | `vfpartner.com.au` | Collision (Top 1M) |
-| 66 | `vibes.com` | Collision (Top 1M) |
-| 67 | `vinmeat.com` | Collision (Top 1M) |
-| 68 | `viralsweep.com` | Collision (Top 1M) |
-| 69 | `vsand-static.com` | Collision (Top 1M) |
-| 70 | `webiskod.com` | Collision (Top 1M) |
-| 71 | `wolfsistemas.me` | Collision (Top 1M) |
-| 72 | `zoomsignage.in` | Collision (Top 1M) |
+| 40 | `fandomlab.com` | Collision (Top 1M) |
+| 41 | `fremontbank.com` | Collision (Top 1M) |
+| 42 | `game4u.co.za` | Collision (Top 1M) |
+| 43 | `glmu.edu.cn` | Collision (Top 1M) |
+| 44 | `hoeren.club` | Collision (Top 1M) |
+| 45 | `horecatiger.eu` | Collision (Top 1M) |
+| 46 | `idexxneo.com` | Collision (Top 1M) |
+| 47 | `inplainsiteuk.com` | Collision (Top 1M) |
+| 48 | `lions-matome.com` | Collision (Top 1M) |
+| 49 | `meiemfoco.com.br` | Collision (Top 1M) |
+| 50 | `ntfs.com` | Collision (Top 1M) |
+| 51 | `okmij.org` | Collision (Top 1M) |
+| 52 | `pnt19.com` | Collision (Top 1M) |
+| 53 | `priceshape.io` | Collision (Top 1M) |
+| 54 | `responsum.app` | Collision (Top 1M) |
+| 55 | `roomie.jp` | Collision (Top 1M) |
+| 56 | `serakon.com` | Collision (Top 1M) |
+| 57 | `studio-mt.net` | Collision (Top 1M) |
+| 58 | `svsu.edu` | Collision (Top 1M) |
+| 59 | `trendyol.global` | Collision (Top 1M) |
+| 60 | `unimercatorum.it` | Collision (Top 1M) |
+| 61 | `vfpartner.com.au` | Collision (Top 1M) |
+| 62 | `vibes.com` | Collision (Top 1M) |
+| 63 | `vizmuvek.hu` | Collision (Top 1M) |
+| 64 | `vsand-static.com` | Collision (Top 1M) |
+| 65 | `webmontag.de` | Collision (Top 1M) |
+| 66 | `wolfsistemas.me` | Collision (Top 1M) |
+| 67 | `yahonty.ru` | Collision (Top 1M) |
+| 68 | `zeusofcoin.lat` | Collision (Top 1M) |
 
 ---
 *Generated automatically by `build/steps/build.01a.whitelist.mjs`*

@@ -4,12 +4,11 @@
   "description": "A high-performance domain blocklist service using a PSL-Aware Hybrid XOR Filter model.",
   "private": true,
   "type": "module",
-  "main": "src/index.mjs",
+  "main": "src/lookup.mjs",
   "scripts": {
     "build": "node build/build.mjs",
-    "dev": "npm run build && wrangler dev",
-    "deploy": "npm run build && wrangler deploy",
-    "test": "node --test tests/"
+    "test": "node --test tests/",
+    "clean": "node build/steps/build.06.cleanup.mjs --nuke"
   },
   "repository": {
     "type": "git",
@@ -19,8 +18,8 @@
   "bugs": {
     "url": "https://github.com/divortio/divortio-domainXOR/issues"
   },
-  "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250807.0",
-    "wrangler": "^4.32.00"
-  }
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {}
 }

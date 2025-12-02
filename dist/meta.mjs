@@ -1,5 +1,5 @@
 export const BUILD_META = {
-    domainCount: "2,415,732",
-    buildDate: "2025-12-01",
-    totalSize: "6.11 MB"
+    domainCount: "2,403,592",
+    buildDate: "2025-12-02",
+    totalSize: "5.85 MB"
 };

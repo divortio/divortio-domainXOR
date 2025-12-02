@@ -1,8 +1,11 @@
 /**
  * @file build/lib/stats/statsCollector.js
  * @description A centralized module for collecting, aggregating, and persisting build metrics.
- * It tracks performance timers, list parsing statistics, and binary artifact metadata throughout
- * the build pipeline, finally writing them to JSON/JS files for reporting and historical analysis.
+ *
+ * UPDATED: Implements "Read-Merge-Write" logic.
+ * Since build steps run in separate processes, this module now reads existing stats files
+ * from disk before writing, ensuring that later steps append/update data rather than
+ * overwriting it with empty state.
  *
  * @module StatsCollector
  */
@@ -12,103 +15,37 @@ import path from 'path';
 import { STATS_DIR, ARTIFACTS } from '../../config.mjs';
 
 /**
- * @typedef {object} ListData
- * @property {string} url - The source URL of the list.
- * @property {number} entryCount - The number of unique valid domains extracted.
- * @property {number} rawCount - The total number of lines/entries in the raw file.
- * @property {number} sizeBytes - The size of the raw content in bytes.
- * @property {number} durationSeconds - The time taken to fetch and parse the list.
- * @property {number} httpStatus - The HTTP status code returned (or 304 for cache).
+ * Global internal state for the CURRENT process.
  */
-
-/**
- * @typedef {object} BinaryData
- * @property {string} name - The human-readable name of the artifact.
- * @property {string} description - A brief description of the artifact's purpose.
- * @property {string} filename - The filename of the generated binary (from ARTIFACTS).
- * @property {string} path - The relative path to the binary file.
- * @property {number} entryCount - The number of items (domains/hashes) stored.
- * @property {number} sizeBytes - The size of the binary in bytes.
- * @property {string} sizeH - The human-readable size string (e.g., "2.4 MB").
- * @property {string} buildTimestamp - ISO 8601 timestamp of creation.
- * @property {number} buildDurationSeconds - Time taken to generate the artifact.
- * @property {string} [falsePositiveRate] - The theoretical false positive rate (if applicable).
- */
-
-/**
- * Global internal state for collecting statistics during the build process.
- * @type {{
- * lists: ListData[],
- * binaries: BinaryData[],
- * timers: Map<string, number>
- * }}
- */
-const globalStats = {
+const currentProcessStats = {
     lists: [],
     binaries: [],
     timers: new Map(),
 };
 
-/**
- * Starts a high-resolution performance timer for a specific operation.
- *
- * @param {string} key - A unique identifier for the timer (e.g., "fetch-google.com").
- * @returns {void}
- */
 export function startTimer(key) {
-    globalStats.timers.set(key, performance.now());
+    currentProcessStats.timers.set(key, performance.now());
 }
 
-/**
- * Stops a previously started timer and calculates the duration in seconds.
- * If the timer key does not exist, returns 0.
- *
- * @param {string} key - The unique identifier of the timer to stop.
- * @returns {number} The duration of the operation in seconds, formatted to 3 decimal places.
- */
 export function stopTimer(key) {
-    const startTime = globalStats.timers.get(key);
-    if (!startTime) {
-        return 0;
-    }
+    const startTime = currentProcessStats.timers.get(key);
+    if (!startTime) return 0;
     const durationMs = performance.now() - startTime;
-    globalStats.timers.delete(key);
+    currentProcessStats.timers.delete(key);
     return parseFloat((durationMs / 1000).toFixed(3));
 }
 
-/**
- * Records statistics for a successfully fetched and parsed domain list.
- *
- * @param {ListData} listData - The metrics object containing details about the fetched list.
- * @returns {void}
- */
 export function addListData(listData) {
-    // Ensure rawCount is present, default to entryCount if missing (legacy support)
-    if (listData.rawCount === undefined) {
-        listData.rawCount = listData.entryCount;
-    }
-    globalStats.lists.push(listData);
+    if (listData.rawCount === undefined) listData.rawCount = listData.entryCount;
+    currentProcessStats.lists.push(listData);
 }
 
-/**
- * Records metadata and statistics for a generated binary artifact (e.g., XOR filter, Trie).
- *
- * @param {BinaryData} binaryData - The metrics object containing details about the generated binary.
- * @returns {void}
- */
 export function addBinaryData(binaryData) {
-    globalStats.binaries.push(binaryData);
+    currentProcessStats.binaries.push(binaryData);
 }
 
-/**
- * Formats a number of bytes into a human-readable string (e.g., "1.5 MB").
- *
- * @param {number} bytes - The size in bytes.
- * @param {number} [decimals=2] - The number of decimal places to include in the output.
- * @returns {string} A human-readable string representation of the size.
- */
 export function formatBytes(bytes, decimals = 2) {
-    if (bytes === 0) return '0 Bytes';
+    if (!bytes || bytes === 0) return '0 Bytes';
     const k = 1024;
     const dm = decimals < 0 ? 0 : decimals;
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
@@ -117,57 +54,111 @@ export function formatBytes(bytes, decimals = 2) {
 }
 
 /**
- * Writes all collected statistics to JSON-like JS modules in the configured stats directory.
- * This function persists data for individual artifacts and a master build summary.
- *
- * @param {object} summary - A generic summary object containing high-level build info (e.g., total duration, timestamp).
- * @returns {void}
+ * Helper to read an existing stats file safely.
+ * @param {string} fileName
+ * @returns {Promise<object|Array|null>}
  */
-export function writeAllStats(summary) {
+async function readExistingStats(fileName) {
+    const filePath = path.join(STATS_DIR, fileName);
+    if (!fs.existsSync(filePath)) return null;
+    try {
+        // Cache-busting import to ensure we get the latest disk content
+        const module = await import(`${filePath}?t=${Date.now()}`);
+        return module.stats;
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * Writes a stats object to a JS module file.
+ * @param {string} fileName
+ * @param {object|Array} data
+ */
+function writeStatsFile(fileName, data) {
     if (!fs.existsSync(STATS_DIR)) {
         fs.mkdirSync(STATS_DIR, { recursive: true });
     }
+    const fullPath = path.join(STATS_DIR, fileName);
+    const content = `export const stats = ${JSON.stringify(data, null, 4)};`;
+    fs.writeFileSync(fullPath, content);
+    console.log(`  - Updated stats: ${path.relative(process.cwd(), fullPath)}`);
+}
 
-    /**
-     * Helper to write a specific stats object to a JS module file.
-     * @param {string} fileName - The name of the output JS file (e.g., "exactXOR.js").
-     * @param {object} data - The data object to serialize.
-     */
-    const writeFile = (fileName, data) => {
-        const fullPath = path.join(STATS_DIR, fileName);
-        const content = `export const stats = ${JSON.stringify(data, null, 4)};`;
-        fs.writeFileSync(fullPath, content);
-        console.log(`  - Wrote stats to ${path.relative(process.cwd(), fullPath)}`);
-    };
+/**
+ * Persists all collected statistics.
+ * Merges current process data with existing disk data to prevent data loss between steps.
+ *
+ * @param {object} [summaryUpdate] - Optional updates for the main build.js summary.
+ * @returns {Promise<void>}
+ */
+export async function writeAllStats(summaryUpdate = {}) {
+    console.log("\n[Stats] Persisting build metrics...");
 
-    console.log("\n[Step 5/5] Writing build statistics...");
+    // 1. Merge Binary Stats (Individual Files)
+    // We simply write whatever binaries were generated in THIS process.
+    // Binaries are distinct (exactXOR, pslTrie), so overwriting their specific file is fine/correct.
+    for (const binary of currentProcessStats.binaries) {
+        let fileName = '';
+        if (binary.filename === ARTIFACTS.EXACT_XOR) fileName = 'exactXOR.js';
+        else if (binary.filename === ARTIFACTS.WILDCARD_XOR) fileName = 'wildcardXOR.js';
+        else if (binary.filename === ARTIFACTS.PSL_TRIE) fileName = 'pslTrie.js';
+        else if (binary.filename === ARTIFACTS.SHADOW_WHITELIST) fileName = 'shadowWhitelist.js';
 
-    // 1. PSL Trie Stats
-    const pslTrieStats = globalStats.binaries.find(b => b.filename === ARTIFACTS.PSL_TRIE);
-    if (pslTrieStats) writeFile('pslTrie.js', pslTrieStats);
+        if (fileName) writeStatsFile(fileName, binary);
+    }
 
-    // 2. Exact Match XOR Stats
-    const exactXORStats = globalStats.binaries.find(b => b.filename === ARTIFACTS.EXACT_XOR);
-    if (exactXORStats) writeFile('exactXOR.js', exactXORStats);
+    // 2. Merge Lists Stats (lists.js)
+    // We read existing lists from disk and append/update with current process lists.
+    let mergedLists = (await readExistingStats('lists.js')) || [];
+    if (!Array.isArray(mergedLists)) mergedLists = [];
 
-    // 3. Wildcard XOR Stats
-    const wildcardXORStats = globalStats.binaries.find(b => b.filename === ARTIFACTS.WILDCARD_XOR);
-    if (wildcardXORStats) writeFile('wildcardXOR.js', wildcardXORStats);
+    // Merge strategy: Overwrite if URL matches (update), else append
+    for (const newList of currentProcessStats.lists) {
+        const index = mergedLists.findIndex(l => l.url === newList.url);
+        if (index !== -1) {
+            mergedLists[index] = newList;
+        } else {
+            mergedLists.push(newList);
+        }
+    }
+    // Only write if we actually have data (to avoid writing empty array on steps that don't touch lists)
+    if (mergedLists.length > 0) {
+        writeStatsFile('lists.js', mergedLists);
+    }
 
-    // 4. Shadow Whitelist Stats
-    const whitelistStats = globalStats.binaries.find(b => b.filename === ARTIFACTS.SHADOW_WHITELIST);
-    if (whitelistStats) writeFile('shadowWhitelist.js', whitelistStats);
+    // 3. Merge Master Build Summary (build.js)
+    let buildSummary = (await readExistingStats('build.js')) || {};
 
-    // 5. Source List Stats
-    writeFile('lists.js', globalStats.lists);
+    // Merge simple fields
+    buildSummary = { ...buildSummary, ...summaryUpdate };
 
-    // 6. Master Build Summary
-    const buildSummary = {
-        ...summary,
-        totalSizeBytes: globalStats.binaries.reduce((sum, b) => sum + b.sizeBytes, 0),
-        totalSizeBytesH: formatBytes(globalStats.binaries.reduce((sum, b) => sum + b.sizeBytes, 0)),
-        binaries: globalStats.binaries.map(b => b.path),
-        lists: globalStats.lists.map(l => l.url),
-    };
-    writeFile('build.js', buildSummary);
+    // Recalculate Totals based on ALL known binaries (disk + current)
+    // We need to scan the stats dir or known artifacts to get the true total size
+    // For simplicity, we'll trust the inputs provided in summaryUpdate,
+    // but we must ensure 'binaries' array is cumulative.
+
+    // Update binary paths list
+    const currentBinaryPaths = currentProcessStats.binaries.map(b => b.path);
+    const existingBinaryPaths = buildSummary.binaries || [];
+    buildSummary.binaries = [...new Set([...existingBinaryPaths, ...currentBinaryPaths])];
+
+    // Update list URLs
+    const currentListUrls = currentProcessStats.lists.map(l => l.url);
+    const existingListUrls = buildSummary.lists || [];
+    buildSummary.lists = [...new Set([...existingListUrls, ...currentListUrls])];
+
+    // Recalculate total size from all known binary stats files on disk
+    let totalBytes = 0;
+    const statFiles = ['exactXOR.js', 'wildcardXOR.js', 'pslTrie.js', 'shadowWhitelist.js'];
+    for (const f of statFiles) {
+        const s = await readExistingStats(f);
+        if (s && s.sizeBytes) totalBytes += s.sizeBytes;
+    }
+    if (totalBytes > 0) {
+        buildSummary.totalSizeBytes = totalBytes;
+        buildSummary.totalSizeBytesH = formatBytes(totalBytes);
+    }
+
+    writeStatsFile('build.js', buildSummary);
 }

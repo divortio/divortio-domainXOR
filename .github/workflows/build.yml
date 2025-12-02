@@ -3,6 +3,9 @@ name: Build DomainXOR Artifacts
 on:
   push:
     branches: [ "main", "master" ]
+  schedule:
+    # 08:00 UTC = 03:00 AM EST (Standard) / 04:00 AM EDT (Daylight)
+    - cron: '0 8 * * *'
   workflow_dispatch:
 
 jobs:
@@ -10,29 +13,30 @@ jobs:
     name: Build & Verify
     runs-on: ubuntu-latest
 
+    # Run steps inside the minimal Alpine container instead of the heavy Ubuntu VM
+    container:
+      image: node:22-alpine
+
     steps:
+      # Alpine is so minimal it needs Git installed to checkout code (~1s overhead)
+      - name: Install System Deps
+        run: apk add --no-cache git
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22 # Use latest LTS or 24 if available
-          cache: 'npm'
+      # 'setup-node' is removed because Node 22 is native to this container
 
       - name: Install Dependencies
         run: npm ci
 
       - name: Run Test Suite
         run: npm test
-        # Fails the workflow if unit tests or integration tests fail.
 
       - name: Build Artifacts
         run: npm run build
-        # Runs the full pipeline: Fetch -> Parse -> Build -> Verify -> Report.
-        # Also generates src/built/meta.mjs and BUILD_REPORT.md.
 
-      - name: Generate Release Version
+      - name: Generate Version Tag
         id: version
         run: echo "VERSION=$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_OUTPUT
 
@@ -40,24 +44,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: domainxor-build-${{ steps.version.outputs.VERSION }}
-          path: |
-            src/built/bins/exactXOR.bin
-            src/built/bins/wildcardXOR.bin
-            src/built/bins/pslTrie.bin
-            src/built/stats/k
-            src/built/meta.mjs
-            src/lib/lookup.mjs
-            BUILD_REPORT.md
+          path: dist/
           if-no-files-found: error
           retention-days: 90
 
-      - name: Publish Release (Optional)
-        # Uncomment this block if you want to create a GitHub Release with the artifacts attached
-        # uses: softprops/action-gh-release@v1
-        # with:
-        #   tag_name: v${{ steps.version.outputs.VERSION }}
-        #   name: Build ${{ steps.version.outputs.VERSION }}
-        #   body_path: src/built/BUILD_REPORT.md
-        #   files: |
-        #     src/built/bins/*.bin
-        #     src/lib/lookup.mjs
+      - name: Publish Build Summary
+        if: always()
+        run: |
+          if [ -f dist/docs/build/BUILD.md ]; then
+            cat dist/docs/build/BUILD.md >> $GITHUB_STEP_SUMMARY
+          fi

@@ -1,5 +1,5 @@
 # 🕵️ Artifact Verification Report
-**Date:** 2025-12-01T10:55:40.120Z
+**Date:** 2025-12-02T03:13:43.532Z
 
 ## 🚨 Critical Infrastructure
 | Domain | Result | Status |
@@ -15,7 +15,7 @@
 | `router` | Allowed | ✅ |
 | `home` | Allowed | ✅ |
 | `captive.apple.com` | Allowed | ✅ |
-| `connectivitycheck.gstatic.com` | Blocked | ❌ |
+| `connectivitycheck.gstatic.com` | Allowed | ✅ |
 | `detectportal.firefox.com` | Allowed | ✅ |
 | `msftconnecttest.com` | Allowed | ✅ |
 | `networkcheck.kde.org` | Allowed | ✅ |
